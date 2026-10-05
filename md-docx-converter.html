@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MD ⇄ DOCX</title>
+<style>
+  :root { --bg:#f6f6f4; --fg:#1d1d1b; --muted:#6b6b66; --card:#fff; --line:#d9d9d4; --accent:#2f5bd3; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#161615; --fg:#ececea; --muted:#9a9a94; --card:#20201e; --line:#3a3a37; --accent:#7f9ff0; } }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.5 -apple-system, system-ui, sans-serif; }
+  main { max-width:720px; margin:0 auto; padding:32px 16px; }
+  h1 { font-size:22px; margin:0 0 4px; }
+  p.sub { color:var(--muted); margin:0 0 20px; }
+  #drop { border:2px dashed var(--line); border-radius:12px; background:var(--card); padding:48px 16px; text-align:center; cursor:pointer; }
+  #drop.over { border-color:var(--accent); }
+  #drop small { color:var(--muted); }
+  ul { list-style:none; padding:0; margin:20px 0 0; }
+  li { display:flex; gap:12px; justify-content:space-between; align-items:center; padding:10px 12px; border:1px solid var(--line); border-radius:8px; background:var(--card); margin-bottom:8px; }
+  li span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  li .err { color:#d33; }
+  a { color:var(--accent); white-space:nowrap; }
+  label { color:var(--muted); font-size:13px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>MD ⇄ DOCX</h1>
+  <p class="sub">.md → .docx, .docx → .md. Всё в браузере, файлы никуда не отправляются.</p>
+  <div id="drop">Перетащите файлы сюда или нажмите<br><small>.md, .markdown, .txt, .docx — можно пачкой</small></div>
+  <input id="pick" type="file" multiple accept=".md,.markdown,.txt,.docx" hidden>
+  <p><label><input id="auto" type="checkbox" checked> Скачивать сразу</label></p>
+  <ul id="out"></ul>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/mammoth@1/mammoth.browser.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/turndown@7/dist/turndown.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/turndown-plugin-gfm@1/dist/turndown-plugin-gfm.js"></script>
+<script type="module">
+import { markdownDocx, Packer } from 'https://cdn.jsdelivr.net/npm/markdown-docx@1/+esm';
+
+const td = new TurndownService({ headingStyle: 'atx', codeBlockStyle: 'fenced', bulletListMarker: '-' });
+td.use(turndownPluginGfm.gfm);
+// mammoth кладёт текст ячеек в <p> — без этого ячейки в md рвутся переносами
+td.addRule('cellParagraph', {
+  filter: n => n.nodeName === 'P' && /^T[DH]$/.test(n.parentNode.nodeName),
+  replacement: c => c.trim() + ' ',
+});
+
+const base = name => name.replace(/\.[^.]+$/, '');
+
+async function convert(file) {
+  if (/\.docx$/i.test(file.name)) {
+    // mammoth: docx → html (стили Word → h1..h6, списки, таблицы), turndown: html → md
+    const { value: html } = await mammoth.convertToHtml({ arrayBuffer: await file.arrayBuffer() });
+    return { blob: new Blob([td.turndown(html)], { type: 'text/markdown' }), name: base(file.name) + '.md' };
+  }
+  if (/\.(md|markdown|txt)$/i.test(file.name)) {
+    const doc = await markdownDocx(await file.text());
+    return { blob: await Packer.toBlob(doc), name: base(file.name) + '.docx' };
+  }
+  throw new Error('неподдерживаемый формат');
+}
+
+const out = document.getElementById('out');
+async function handle(files) {
+  for (const file of files) {
+    const li = document.createElement('li');
+    li.innerHTML = `<span></span><em>…</em>`;
+    li.firstChild.textContent = file.name;
+    out.prepend(li);
+    try {
+      const { blob, name } = await convert(file);
+      const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: name, textContent: '↓ ' + name });
+      li.lastChild.replaceWith(a);
+      if (document.getElementById('auto').checked) a.click();
+    } catch (e) {
+      li.lastChild.className = 'err';
+      li.lastChild.textContent = e.message;
+    }
+  }
+}
+
+const drop = document.getElementById('drop'), pick = document.getElementById('pick');
+drop.onclick = () => pick.click();
+pick.onchange = () => { handle([...pick.files]); pick.value = ''; };
+drop.ondragover = e => { e.preventDefault(); drop.classList.add('over'); };
+drop.ondragleave = () => drop.classList.remove('over');
+drop.ondrop = e => { e.preventDefault(); drop.classList.remove('over'); handle([...e.dataTransfer.files]); };
+</script>
+</body>
+</html>
